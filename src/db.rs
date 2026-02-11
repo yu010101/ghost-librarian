@@ -49,7 +49,10 @@ pub async fn ensure_collection(client: &Qdrant) -> Result<()> {
 
 pub async fn upsert_points(client: &Qdrant, points: Vec<PointStruct>) -> Result<()> {
     client
-        .upsert_points(UpsertPointsBuilder::new(COLLECTION_NAME.to_string(), points))
+        .upsert_points(UpsertPointsBuilder::new(
+            COLLECTION_NAME.to_string(),
+            points,
+        ))
         .await
         .context("Failed to upsert points")?;
     Ok(())
@@ -88,7 +91,7 @@ pub async fn collection_info(client: &Qdrant) -> Result<(u64, u64)> {
 
     let result = info.result.context("No collection info returned")?;
     let points = result.points_count.unwrap_or(0);
-    let segments = result.segments_count as u64;
+    let segments = result.segments_count;
     Ok((points, segments))
 }
 
@@ -106,7 +109,10 @@ pub async fn list_filenames(client: &Qdrant) -> Result<Vec<(String, usize)>> {
             request = request.offset(off);
         }
 
-        let response = client.scroll(request).await.context("Failed to scroll points")?;
+        let response = client
+            .scroll(request)
+            .await
+            .context("Failed to scroll points")?;
         let result = response.result;
 
         if result.is_empty() {

@@ -140,11 +140,7 @@ pub async fn ingest_file(
             .into_iter()
             .collect();
 
-            let point = PointStruct::new(
-                Uuid::new_v4().to_string(),
-                embedding.clone(),
-                payload,
-            );
+            let point = PointStruct::new(Uuid::new_v4().to_string(), embedding.clone(), payload);
             all_points.push(point);
             pb.inc(1);
         }
@@ -165,7 +161,9 @@ pub async fn ingest_file(
 /// Find which markdown section a chunk belongs to
 fn find_section_for_chunk(chunk: &str, sections: &[(String, String)]) -> String {
     for (heading, content) in sections {
-        if content.contains(chunk) || chunk.contains(content.get(..50.min(content.len())).unwrap_or(content)) {
+        if content.contains(chunk)
+            || chunk.contains(content.get(..50.min(content.len())).unwrap_or(content))
+        {
             return heading.clone();
         }
     }

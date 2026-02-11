@@ -55,11 +55,7 @@ pub async fn list_models() -> Result<Vec<String>> {
 }
 
 /// Generate a response using Ollama with streaming output
-pub async fn ask_with_context(
-    query: &str,
-    context: &str,
-    model: Option<&str>,
-) -> Result<String> {
+pub async fn ask_with_context(query: &str, context: &str, model: Option<&str>) -> Result<String> {
     let ollama = create_ollama();
     let model_name = model.unwrap_or(&default_model()).to_string();
 
@@ -75,9 +71,10 @@ pub async fn ask_with_context(
                 .num_predict(1024),
         );
 
-    let mut stream = ollama.generate_stream(request).await.context(
-        "Failed to connect to Ollama. Is it running? (ollama serve)",
-    )?;
+    let mut stream = ollama
+        .generate_stream(request)
+        .await
+        .context("Failed to connect to Ollama. Is it running? (ollama serve)")?;
 
     let mut full_response = String::new();
 

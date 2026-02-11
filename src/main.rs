@@ -89,7 +89,7 @@ async fn require_ollama() -> Result<()> {
     Ok(())
 }
 
-async fn cmd_add(path: &PathBuf) -> Result<()> {
+async fn cmd_add(path: &std::path::Path) -> Result<()> {
     if !path.exists() {
         anyhow::bail!("File not found: {}", path.display());
     }
@@ -102,7 +102,10 @@ async fn cmd_add(path: &PathBuf) -> Result<()> {
     let embedder = core::ingest::create_embedder()?;
     let chunks = core::ingest::ingest_file(path, &embedder, &client).await?;
 
-    println!("\nSuccessfully indexed {chunks} chunks from {}", path.display());
+    println!(
+        "\nSuccessfully indexed {chunks} chunks from {}",
+        path.display()
+    );
     Ok(())
 }
 

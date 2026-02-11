@@ -153,7 +153,11 @@ struct ScoredChunk {
 fn extract_terms(query: &str) -> Vec<String> {
     query
         .split_whitespace()
-        .map(|w| w.to_lowercase().trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+        .map(|w| {
+            w.to_lowercase()
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_string()
+        })
         .filter(|w| !w.is_empty() && w.len() > 2)
         .collect()
 }
