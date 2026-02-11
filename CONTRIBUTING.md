@@ -41,6 +41,6 @@ cargo test
 
 ## Reporting Issues
 
-- Use the [GitHub issue tracker](https://github.com/yu01/ghost-librarian/issues)
+- Use the [GitHub issue tracker](https://github.com/yu010101/ghost-librarian/issues)
 - Include steps to reproduce
 - Include your OS and Rust version (`rustc --version`)

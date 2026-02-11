@@ -25,7 +25,7 @@ Index your documents locally, ask questions, and get precise answers powered by 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yu01/ghost-librarian.git
+git clone https://github.com/yu010101/ghost-librarian.git
 cd ghost-librarian
 
 # Start Qdrant
