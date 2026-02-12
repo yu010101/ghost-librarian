@@ -3,6 +3,7 @@ use ollama_rs::generation::completion::request::GenerationRequest;
 use ollama_rs::generation::options::GenerationOptions;
 use ollama_rs::Ollama;
 use std::io::Write;
+use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 const SYSTEM_PROMPT: &str = r#"You are Ghost Librarian, a precise research assistant. Answer questions using ONLY the provided context. Follow these rules strictly:
@@ -36,10 +37,9 @@ fn create_ollama() -> Ollama {
 
 /// Check if Ollama is running and accessible
 pub async fn health_check() -> Result<bool> {
-    let url = format!("{}:{}/api/tags", ollama_host(), ollama_port());
-    let resp = reqwest::get(&url).await;
-    match resp {
-        Ok(r) => Ok(r.status().is_success()),
+    let ollama = create_ollama();
+    match ollama.list_local_models().await {
+        Ok(_) => Ok(true),
         Err(_) => Ok(false),
     }
 }
@@ -88,4 +88,63 @@ pub async fn ask_with_context(query: &str, context: &str, model: Option<&str>) -
     println!();
 
     Ok(full_response)
+}
+
+/// Events sent through the streaming channel
+#[derive(Debug)]
+pub enum StreamEvent {
+    Token(String),
+    Done,
+    Error(String),
+}
+
+/// Return the active model name (from env or default)
+pub fn active_model_name(model_override: Option<&str>) -> String {
+    model_override
+        .map(String::from)
+        .unwrap_or_else(default_model)
+}
+
+/// Channel-based streaming: spawnable with owned parameters.
+/// Sends tokens through `tx` as they arrive from Ollama.
+pub async fn ask_with_context_stream(
+    query: String,
+    context: String,
+    model: Option<String>,
+    tx: mpsc::UnboundedSender<StreamEvent>,
+) {
+    let ollama = create_ollama();
+    let model_name = model.unwrap_or_else(default_model);
+
+    let prompt = format!(
+        "CONTEXT:\n{context}\n\n---\nQUESTION: {query}\n\nProvide a precise answer based only on the context above."
+    );
+
+    let request = GenerationRequest::new(model_name, prompt)
+        .system(SYSTEM_PROMPT.to_string())
+        .options(
+            GenerationOptions::default()
+                .temperature(0.1)
+                .num_predict(1024),
+        );
+
+    let stream_result = ollama.generate_stream(request).await;
+
+    match stream_result {
+        Ok(mut stream) => {
+            while let Some(Ok(responses)) = stream.next().await {
+                for response in responses {
+                    if tx.send(StreamEvent::Token(response.response)).is_err() {
+                        return;
+                    }
+                }
+            }
+            let _ = tx.send(StreamEvent::Done);
+        }
+        Err(e) => {
+            let _ = tx.send(StreamEvent::Error(format!(
+                "Failed to connect to Ollama: {e}"
+            )));
+        }
+    }
 }

@@ -15,9 +15,6 @@ Thank you for considering contributing to Ghost Librarian!
 ## Development Setup
 
 ```bash
-# Start Qdrant
-docker compose up -d
-
 # Install Ollama and pull a model
 ollama pull llama3
 

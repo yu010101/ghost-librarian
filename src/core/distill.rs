@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::core::ingest;
-use crate::db;
+use crate::db::{self, VectorStore};
 use crate::utils::text_cleaner;
 
 /// Result of the distillation process
@@ -30,7 +30,7 @@ const TOP_K: u64 = 20;
 pub async fn distill(
     query: &str,
     embedder: &Arc<Mutex<TextEmbedding>>,
-    client: &qdrant_client::Qdrant,
+    store: &VectorStore,
     context_budget: Option<usize>,
 ) -> Result<DistillResult> {
     let budget = context_budget.unwrap_or(DEFAULT_CONTEXT_BUDGET);
@@ -40,7 +40,7 @@ pub async fn distill(
     let query_vec = query_embedding.into_iter().next().unwrap();
 
     // 2. Vector similarity search
-    let search_results = db::search_vectors(client, query_vec.clone(), TOP_K).await?;
+    let search_results = db::search_vectors(store, query_vec.clone(), TOP_K).await?;
 
     if search_results.is_empty() {
         return Ok(DistillResult {

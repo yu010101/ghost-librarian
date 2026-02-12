@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use indicatif::{ProgressBar, ProgressStyle};
-use qdrant_client::qdrant::PointStruct;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -57,11 +57,11 @@ fn read_document(path: &Path) -> Result<String> {
     }
 }
 
-/// Ingest a document: read, split, embed, and store in Qdrant
+/// Ingest a document: read, split, embed, and store
 pub async fn ingest_file(
     path: &Path,
     embedder: &Arc<Mutex<TextEmbedding>>,
-    client: &qdrant_client::Qdrant,
+    store: &mut db::VectorStore,
 ) -> Result<usize> {
     let filename = path
         .file_name()
@@ -119,35 +119,27 @@ pub async fn ingest_file(
             // Find the section this chunk belongs to
             let section_name = find_section_for_chunk(chunk_text, &sections);
 
-            let payload: HashMap<String, qdrant_client::qdrant::Value> = [
-                (
-                    "filename".to_string(),
-                    qdrant_client::qdrant::Value::from(filename.clone()),
-                ),
-                (
-                    "section".to_string(),
-                    qdrant_client::qdrant::Value::from(section_name),
-                ),
-                (
-                    "chunk_index".to_string(),
-                    qdrant_client::qdrant::Value::from(chunk_index as i64),
-                ),
-                (
-                    "text".to_string(),
-                    qdrant_client::qdrant::Value::from(chunk_text.clone()),
-                ),
+            let payload: HashMap<String, Value> = [
+                ("filename".to_string(), Value::String(filename.clone())),
+                ("section".to_string(), Value::String(section_name)),
+                ("chunk_index".to_string(), serde_json::json!(chunk_index)),
+                ("text".to_string(), Value::String(chunk_text.clone())),
             ]
             .into_iter()
             .collect();
 
-            let point = PointStruct::new(Uuid::new_v4().to_string(), embedding.clone(), payload);
+            let point = db::Point {
+                id: Uuid::new_v4().to_string(),
+                vector: embedding.clone(),
+                payload,
+            };
             all_points.push(point);
             pb.inc(1);
         }
     }
 
     // Upsert all points
-    db::upsert_points(client, all_points).await?;
+    db::upsert_points(store, all_points).await?;
 
     pb.finish_with_message("Done");
     println!(

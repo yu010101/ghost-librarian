@@ -1,5 +1,6 @@
 mod core;
 mod db;
+mod tui;
 mod utils;
 
 use anyhow::Result;
@@ -45,8 +46,17 @@ enum Commands {
     },
     /// Show index statistics
     Stats,
-    /// Health check for Qdrant and Ollama
+    /// Health check for Ollama
     Check,
+    /// Interactive TUI chat with context distillation
+    Chat {
+        /// LLM model to use (default: llama3, override with GHOST_MODEL)
+        #[arg(short, long)]
+        model: Option<String>,
+        /// Context budget in tokens (default: 3000)
+        #[arg(short, long)]
+        budget: Option<usize>,
+    },
 }
 
 #[tokio::main]
@@ -64,18 +74,8 @@ async fn main() -> Result<()> {
         Commands::Delete { filename } => cmd_delete(&filename).await,
         Commands::Stats => cmd_stats().await,
         Commands::Check => cmd_check().await,
+        Commands::Chat { model, budget } => tui::cmd_chat(model.as_deref(), budget).await,
     }
-}
-
-/// Pre-flight check: ensure Qdrant is reachable
-async fn require_qdrant() -> Result<()> {
-    if !db::health_check().await? {
-        anyhow::bail!(
-            "Qdrant is not reachable.\n\
-             Start it with: docker compose up -d"
-        );
-    }
-    Ok(())
 }
 
 /// Pre-flight check: ensure Ollama is reachable
@@ -94,13 +94,10 @@ async fn cmd_add(path: &std::path::Path) -> Result<()> {
         anyhow::bail!("File not found: {}", path.display());
     }
 
-    require_qdrant().await?;
-
-    let client = db::create_client().await?;
-    db::ensure_collection(&client).await?;
+    let mut store = db::open_store().await?;
 
     let embedder = core::ingest::create_embedder()?;
-    let chunks = core::ingest::ingest_file(path, &embedder, &client).await?;
+    let chunks = core::ingest::ingest_file(path, &embedder, &mut store).await?;
 
     println!(
         "\nSuccessfully indexed {chunks} chunks from {}",
@@ -110,14 +107,13 @@ async fn cmd_add(path: &std::path::Path) -> Result<()> {
 }
 
 async fn cmd_ask(query: &str, model: Option<&str>, budget: Option<usize>) -> Result<()> {
-    require_qdrant().await?;
     require_ollama().await?;
 
-    let client = db::create_client().await?;
+    let store = db::open_store().await?;
     let embedder = core::ingest::create_embedder()?;
 
     println!("Distilling context...\n");
-    let result = core::distill::distill(query, &embedder, &client, budget).await?;
+    let result = core::distill::distill(query, &embedder, &store, budget).await?;
 
     if result.context.is_empty() {
         println!("No relevant documents found. Add documents first with: ghost-lib add <path>");
@@ -142,11 +138,9 @@ async fn cmd_ask(query: &str, model: Option<&str>, budget: Option<usize>) -> Res
 }
 
 async fn cmd_list() -> Result<()> {
-    require_qdrant().await?;
+    let store = db::open_store().await?;
 
-    let client = db::create_client().await?;
-
-    match db::list_filenames(&client).await {
+    match db::list_filenames(&store).await {
         Ok(files) if !files.is_empty() => {
             println!("Indexed documents:\n");
             for (filename, chunks) in &files {
@@ -158,7 +152,7 @@ async fn cmd_list() -> Result<()> {
             println!("No documents indexed. Add one with: ghost-lib add <path>");
         }
         Err(_) => {
-            println!("No collection found. Add documents first with: ghost-lib add <path>");
+            println!("No documents indexed. Add one with: ghost-lib add <path>");
         }
     }
 
@@ -166,10 +160,8 @@ async fn cmd_list() -> Result<()> {
 }
 
 async fn cmd_delete(filename: &str) -> Result<()> {
-    require_qdrant().await?;
-
-    let client = db::create_client().await?;
-    let deleted = db::delete_by_filename(&client, filename).await?;
+    let mut store = db::open_store().await?;
+    let deleted = db::delete_by_filename(&mut store, filename).await?;
 
     if deleted > 0 {
         println!("Deleted {deleted} chunks for: {filename}");
@@ -182,30 +174,21 @@ async fn cmd_delete(filename: &str) -> Result<()> {
 }
 
 async fn cmd_stats() -> Result<()> {
-    let client = db::create_client().await?;
+    let store = db::open_store().await?;
 
-    match db::collection_info(&client).await {
-        Ok((points, segments)) => {
-            println!("Ghost Library Stats");
-            println!("  Collection:  {}", db::COLLECTION_NAME);
-            println!("  Documents:   {points} chunks indexed");
-            println!("  Segments:    {segments}");
-        }
-        Err(_) => {
-            println!("No collection found. Add documents first with: ghost-lib add <path>");
-        }
+    let (points, _segments) = db::collection_info(&store).await?;
+    if points > 0 {
+        println!("Ghost Library Stats");
+        println!("  Collection:  {}", db::COLLECTION_NAME);
+        println!("  Documents:   {points} chunks indexed");
+    } else {
+        println!("No documents indexed. Add one with: ghost-lib add <path>");
     }
 
     Ok(())
 }
 
 async fn cmd_check() -> Result<()> {
-    print!("Qdrant ...  ");
-    match db::health_check().await? {
-        true => println!("OK"),
-        false => println!("UNREACHABLE — run: docker compose up -d"),
-    }
-
     print!("Ollama ...  ");
     match core::provider::health_check().await? {
         true => {
@@ -224,6 +207,10 @@ async fn cmd_check() -> Result<()> {
         }
         false => println!("UNREACHABLE — run: ollama serve"),
     }
+
+    let store = db::open_store().await?;
+    let (points, _) = db::collection_info(&store).await?;
+    println!("Store  ...  OK ({points} chunks)");
 
     Ok(())
 }
