@@ -9,49 +9,43 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            use_cross: false
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            use_cross: true
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            use_cross: false
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            use_cross: false
-
+  build-linux:
+    name: Build x86_64-unknown-linux-gnu
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --target x86_64-unknown-linux-gnu
+      - name: Package
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          ARCHIVE_NAME="ghost-lib-${TAG}-x86_64-unknown-linux-gnu"
+          mkdir -p "${ARCHIVE_NAME}"
+          cp target/x86_64-unknown-linux-gnu/release/ghost-lib "${ARCHIVE_NAME}/"
+          cp README.md LICENSE "${ARCHIVE_NAME}/"
+          tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghost-lib-x86_64-unknown-linux-gnu
+          path: ghost-lib-*.tar.gz
 
+  build-macos:
+    name: Build macOS (${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
       - uses: Swatinem/rust-cache@v2
-
-      - name: Install cross
-        if: matrix.use_cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build release binary (cross)
-        if: matrix.use_cross
-        run: cross build --release --target ${{ matrix.target }}
-
-      - name: Build release binary (cargo)
-        if: ${{ !matrix.use_cross }}
-        run: cargo build --release --target ${{ matrix.target }}
-
+      - run: cargo build --release --target ${{ matrix.target }}
       - name: Package
-        shell: bash
         run: |
           TAG=${GITHUB_REF#refs/tags/}
           ARCHIVE_NAME="ghost-lib-${TAG}-${{ matrix.target }}"
@@ -59,16 +53,14 @@ jobs:
           cp target/${{ matrix.target }}/release/ghost-lib "${ARCHIVE_NAME}/"
           cp README.md LICENSE "${ARCHIVE_NAME}/"
           tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ghost-lib-${{ matrix.target }}
           path: ghost-lib-*.tar.gz
 
   release:
     name: Create Release
-    needs: build
+    needs: [build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
